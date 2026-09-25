@@ -133,6 +133,16 @@ workflows:
           extra_args: ["-lock=false"]
 ```
 
+::: tip Note
+Each entry in `extra_args` is passed to Terraform as a single argument. It is not
+interpreted by a shell, so shell operators (`;`, `&&`, `|`, redirections),
+globbing and word splitting do not apply. Environment variable references such
+as `$WORKSPACE`, `$DIR` and `$ATLANTIS_TERRAFORM_VERSION` are still expanded.
+
+If you need shell behaviour, use a `run` step, which is executed with a shell by
+design.
+:::
+
 If [policy checking](policy-checking.md#how-it-works) is enabled, `extra_args` can also be used to change the default behaviour of conftest.
 
 ```yaml
@@ -178,16 +188,28 @@ workflows:
       - run: terraform apply $PLANFILE
 ```
 
-### CDKTF
+### CDK Terrain (CDKTN)
 
-Here are the requirements to enable [CDKTF](https://developer.hashicorp.com/terraform/cdktf)
+[CDK Terrain](https://cdktn.io) (CDKTN) is the community continuation of CDK for Terraform (CDKTF), which
+HashiCorp archived in December 2025. It synthesizes Terraform configuration from TypeScript, Python, Go, Java
+or C#, and supports both Terraform and OpenTofu.
 
-* A custom image with `CDKTF` installed
+Here are the requirements to enable [CDKTN](https://cdktn.io/docs)
+
+* A custom image with `cdktn-cli` installed
 * Add `**/cdk.tf.json` to the list of Atlantis autoplan files.
 * Set the `atlantis-include-git-untracked-files` flag so that the Terraform files dynamically generated
-by CDKTF will be added to the Atlantis modified file list.
-* Use `pre_workflow_hooks` to run `cdktf synth`
+by CDKTN will be added to the Atlantis modified file list.
+* Use `pre_workflow_hooks` to run `cdktn synth`
 * Optional: There isn't a requirement to use a repo `atlantis.yaml` but one can be leveraged if needed.
+
+::: tip Migrating from CDKTF
+Migration is mostly a rename: install `cdktn-cli` instead of `cdktf-cli`, and swap the `cdktf` and
+`@cdktf/provider-*` packages for `cdktn` and `@cdktn/provider-*`. The project manifest is still `cdktf.json`,
+the synthesized files are still `cdk.tf.json`, and the `CDKTF_*` environment variables are unchanged, so the
+Atlantis configuration below applies to both. See the
+[migration guide](https://cdktn.io/docs/release/upgrade-guide-v0-22).
+:::
 
 #### Custom Image
 
@@ -196,7 +218,7 @@ by CDKTF will be added to the Atlantis modified file list.
 FROM ghcr.io/runatlantis/atlantis:v0.19.7
 
 USER root
-RUN apk add npm && npm i -g cdktf-cli
+RUN apk add npm && npm i -g cdktn-cli
 ```
 
 #### Server Config
@@ -226,38 +248,63 @@ Use `pre_workflow_hooks`
 ```yaml
 # repos.yaml
 repos:
-  - id: /.*cdktf.*/
+  - id: /.*cdktn.*/
     pre_workflow_hooks:
-      - run: npm i && cdktf get && cdktf synth --output ci-cdktf.out
+      - run: npm i && cdktn get && cdktn synth --output ci-cdktn.out
 ```
 
-**Note:** don't use the default `cdktf.out` directory that CDKTF uses, as this should be in the `.gitignore` list of the
+**Note:** don't use the default `cdktf.out` directory that CDKTN uses, as this should be in the `.gitignore` list of the
 repo, so that locally generated files are not checked in.
 
 #### Repo Structure
 
-This is the git repo structure after running `cdktf synth`. The `cdk.tf.json` files contain the Terraform configuration
+This is the git repo structure after running `cdktn synth`. The `cdk.tf.json` files contain the Terraform configuration
 that atlantis can run.
 
 ```bash
 $ tree --gitignore
 .
 ├── cdktf.json
-├── ci-cdktf.out
+├── ci-cdktn.out
 │   ├── manifest.json
 │   └── stacks
 │       └── eks
 │           └── cdk.tf.json
 ```
 
+#### Terraform or OpenTofu
+
+CDKTN supports both distributions. Atlantis runs `plan` and `apply` itself with the one selected by
+[`--default-tf-distribution`](server-configuration.md#default-tf-distribution), so declare the matching
+versions in `cdktf.json`:
+
+```json
+{
+  "targetVersions": {
+    "terraform": ">=1.5.7",
+    "opentofu": ">=1.6.0"
+  }
+}
+```
+
+CDKTN validates the configuration it generates against these ranges at synth time, without running a binary.
+Core functions and provider capabilities that only exist in newer releases — provider-defined functions,
+ephemeral resources, write-only attributes — then fail `cdktn synth` in the `pre_workflow_hooks` step rather
+than surfacing as a Terraform error during `plan`. See the
+[function availability matrix](https://cdktn.io/docs/release/function-availability) for which version
+introduced what.
+
+To have `cdktn` itself drive OpenTofu rather than Terraform, set `TERRAFORM_BINARY_NAME=tofu` in the Atlantis
+environment.
+
 #### Workflow
 
-1. Container orchestrator (k8s/fargate/ecs/etc) uses the custom docker image of atlantis with `cdktf` installed with
+1. Container orchestrator (k8s/fargate/ecs/etc) uses the custom docker image of atlantis with `cdktn` installed with
 the `--autoplan-file-list` to trigger on `cdk.tf.json` files and `--include-git-untracked-files` set to include the
-CDKTF dynamically generated Terraform files in the Atlantis plan.
-1. PR branch is pushed up containing `cdktf` code changes.
+CDKTN dynamically generated Terraform files in the Atlantis plan.
+1. PR branch is pushed up containing `cdktn` code changes.
 1. Atlantis checks out the branch in the repo.
-1. Atlantis runs the `npm i && cdktf get && cdktf synth` command in the repo root as a step in `pre_workflow_hooks`,
+1. Atlantis runs the `npm i && cdktn get && cdktn synth` command in the repo root as a step in `pre_workflow_hooks`,
 generating the `cdk.tf.json` Terraform files.
 1. Atlantis detects the `cdk.tf.json` untracked files in a number of directories.
 1. Atlantis then runs `terraform` workflows in the respective directories as usual.
@@ -647,6 +694,11 @@ Full example, filtering output and masking matching text (`mySecret: "foo"` -> `
   * `PLANFILE` - Absolute path to the location where Atlantis expects the plan to
       either be generated (by plan) or already exist (if running apply). Can be used to
       override the built-in `plan`/`apply` commands, ex. `run: terraform plan -out $PLANFILE`.
+      A workflow whose `plan` and `apply` are both made up entirely of custom `run` steps
+      may write its plan to a path of its own choosing instead of `$PLANFILE`. Atlantis
+      does not require, hash, or delete a plan artifact for such a workflow; it still
+      validates the project's recorded plan state before running `apply`. As soon as a
+      workflow uses the built-in `plan` or `apply` step, the plan must be at `$PLANFILE`.
   * `SHOWFILE` - Absolute path to the location where Atlantis expects the plan in json format to
       either be generated (by show) or already exist (if running policy checks). Can be used to
       override the built-in `plan`/`apply` commands, ex. `run: terraform show -json $PLANFILE > $SHOWFILE`.

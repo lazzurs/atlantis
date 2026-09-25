@@ -165,6 +165,20 @@ Default merge method to use when automerging pull requests. Valid values are
 method is used. This can be overridden per command with the `--auto-merge-method`
 comment flag. Currently only implemented for GitHub.
 
+### `--automerge-retry-count`
+
+```bash
+atlantis server --automerge-retry-count=3
+# or
+ATLANTIS_AUTOMERGE_RETRY_COUNT=3
+```
+
+Number of times to retry merging a pull request when `--automerge` is enabled and
+the merge fails. Retries use an exponential backoff and help work around transient
+VCS errors, such as GitHub branch protection or repository rulesets briefly
+reporting required status checks as pending immediately after Atlantis applies.
+Defaults to `0`, which attempts the merge exactly once.
+
 ### `--autoplan-file-list` <Badge text="v0.15.0+" type="info"/>
 
 ```bash
@@ -452,7 +466,7 @@ ATLANTIS_DATA_DIR="path/to/data/dir"
 ```
 
 Directory where Atlantis will store its data. Will be created if it doesn't exist.
-Defaults to `~/.atlantis`. Atlantis will store its database, checked out repos, Terraform plans and downloaded
+Defaults to `~/.atlantis`. Atlantis will store its database, checked out repos, Terraform plans by default, and downloaded
 Terraform binaries here. If Atlantis loses this directory, [locks](locking.md)
 will be lost and unapplied plans will be lost.
 
@@ -643,6 +657,16 @@ rejected while read-only drift detection remains available. This flag does not b
 repository `apply_requirements`; requirements that need pull request state fail closed for
 non-PR remediation requests. Defaults to `false`.
 
+### `--enable-external-stores`
+
+```bash
+atlantis server --enable-external-stores
+# or
+ATLANTIS_ENABLE_EXTERNAL_STORES=true
+```
+
+Enable external storage backends configured in the server-side repo config (`external_stores` block). When set, Atlantis reads the `external_stores` section from the repo config YAML to initialize backends such as S3 for plan file persistence.
+
 ### `--enable-policy-checks` <Badge text="v0.17.0" type="info"/>
 
 ```bash
@@ -697,6 +721,8 @@ ATLANTIS_EXECUTABLE_NAME="atlantis"
 Comment command trigger executable name. Defaults to `atlantis`.
 
 This is useful when running multiple Atlantis servers against a single repository.
+
+Note: the "did you mean" misspelling warning only applies to the default executable name (`atlantis`). If you set a custom `--executable-name`, Atlantis won't warn about comments that are Levenshtein-close to it — this avoids spurious warnings when multiple servers with similar names (e.g. `atlantis-dev` and `atlantis-prod`) receive the same comment.
 
 ### `--fail-on-pre-workflow-hook-error` <Badge text="v0.27.0+" type="info"/>
 
@@ -1085,8 +1111,8 @@ ATLANTIS_INCLUDE_GIT_UNTRACKED_FILES=true
 ```
 
 Include git untracked files in the Atlantis modified file list.
-Used for example with CDKTF pre-workflow hooks that dynamically generate
-Terraform files.
+Used for example with [CDK Terrain](custom-workflows.md#cdk-terrain-cdktn) pre-workflow hooks that
+dynamically generate Terraform files.
 
 ### `--language` <Badge text="v0.45.0+" type="info"/>
 
@@ -1450,6 +1476,16 @@ ATLANTIS_RESTRICT_FILE_LIST=true
 `--restrict-file-list` will block plan requests from projects outside the files modified in the pull request.
 When `--enable-regexp-cmd` is also enabled, regex project plans such as `atlantis plan -p .*` are scoped to matching projects with files modified in the pull request.
 Defaults to `false`.
+
+### `--share-plan-dir`
+
+```bash
+atlantis server --share-plan-dir="path/to/local/plan/dir"
+# or
+ATLANTIS_SHARE_PLAN_DIR="path/to/local/plan/dir"
+```
+
+Directory where Atlantis will store local Terraform plan files. If unset, this defaults to the resolved `--data-dir` value so existing installations keep the same on-disk layout. When set to a different directory, checked out repositories remain under `--data-dir` and generated `.tfplan` files use the same repo, pull request, workspace, and project path layout under `--share-plan-dir`.
 
 ### `--silence-allowlist-errors` <Badge text="v0.28.0+" type="info"/>
 

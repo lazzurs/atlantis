@@ -1,4 +1,4 @@
-FROM golang:1.26.5@sha256:ae5a2316d12f3e78fd99177dad452e6ad4f240af2d71d57b480c3477f250fec6
+FROM golang:1.27.1@sha256:f44f6e88636cfb311f9ebace870ded69d943f227bb3cb27d32ffd84ea18c43ea
 
 RUN apt-get update && apt-get --no-install-recommends -y install unzip \
     && apt-get clean \
@@ -8,7 +8,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Install Terraform
 # renovate: datasource=github-releases depName=hashicorp/terraform versioning=hashicorp
-ENV TERRAFORM_VERSION=1.14.9
+ENV TERRAFORM_VERSION=1.16.3
 RUN case "$(uname -m)" in x86_64|amd64) ARCH="amd64" ;; aarch64|arm64|armv7l) ARCH="arm64" ;; *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;; esac && \
     TERRAFORM_ARCHIVE="terraform_${TERRAFORM_VERSION}_linux_${ARCH}.zip" && \
     wget -nv "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/${TERRAFORM_ARCHIVE}" && \
@@ -21,7 +21,7 @@ RUN case "$(uname -m)" in x86_64|amd64) ARCH="amd64" ;; aarch64|arm64|armv7l) AR
 
 # Install conftest
 # renovate: datasource=github-releases depName=open-policy-agent/conftest
-ENV CONFTEST_VERSION=0.66.0
+ENV CONFTEST_VERSION=0.69.0
 RUN case $(uname -m) in x86_64|amd64) ARCH="x86_64" ;; aarch64|arm64|armv7l) ARCH="arm64" ;; esac && \
     curl -LOs https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_${ARCH}.tar.gz && \
     curl -LOs https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/checksums.txt && \

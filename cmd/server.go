@@ -53,6 +53,7 @@ const (
 	AutoDiscoverModeFlag             = "autodiscover-mode"
 	AutomergeFlag                    = "automerge"
 	AutomergeMethodFlag              = "automerge-method"
+	AutomergeRetryCountFlag          = "automerge-retry-count"
 	ParallelPlanFlag                 = "parallel-plan"
 	ParallelApplyFlag                = "parallel-apply"
 	AutoplanModules                  = "autoplan-modules"
@@ -119,9 +120,11 @@ const (
 	MarkdownTemplateOverridesDirFlag = "markdown-template-overrides-dir"
 	MaxCommentsPerCommand            = "max-comments-per-command"
 	ParallelPoolSize                 = "parallel-pool-size"
+	SharePlanDirFlag                 = "share-plan-dir"
 	PendingApplyStatusFlag           = "pending-apply-status"
 	StatsNamespace                   = "stats-namespace"
 	AllowDraftPRs                    = "allow-draft-prs"
+	EnableExternalStoresFlag         = "enable-external-stores"
 	PortFlag                         = "port"
 	RedisDB                          = "redis-db"
 	RedisHost                        = "redis-host"
@@ -432,6 +435,10 @@ var stringFlags = map[string]stringFlag{
 		description:  "Namespace for aggregating stats.",
 		defaultValue: DefaultStatsNamespace,
 	},
+	SharePlanDirFlag: {
+		description:  "Path to directory to store local Terraform plan files. If unset, defaults to --" + DataDirFlag + ".",
+		defaultValue: "",
+	},
 	RedisHost: {
 		description: "The Redis Hostname for when using a Locking DB type of 'redis'.",
 	},
@@ -614,6 +621,10 @@ var boolFlags = map[string]boolFlag{
 		description:  "Set apply job status as pending when there are planned changes that haven't been applied yet. Currently only supported for GitLab.",
 		defaultValue: false,
 	},
+	EnableExternalStoresFlag: {
+		description:  "Enable external storage backends configured in the server-side repo config (external_stores block).",
+		defaultValue: false,
+	},
 	QuietPolicyChecks: {
 		description:  "Exclude policy check comments from pull requests unless there's an actual error from conftest. This also excludes warnings.",
 		defaultValue: false,
@@ -697,6 +708,13 @@ var boolFlags = map[string]boolFlag{
 	},
 }
 var intFlags = map[string]intFlag{
+	AutomergeRetryCountFlag: {
+		description: fmt.Sprintf("Number of times to retry merging a pull request when automerge (--%s) is enabled and the merge fails. "+
+			"Retries use an exponential backoff and help work around transient VCS errors, such as GitHub branch protection or "+
+			"repository rulesets briefly reporting required status checks as pending right after Atlantis applies. "+
+			"Defaults to 0, which attempts the merge exactly once.", AutomergeFlag),
+		defaultValue: 0,
+	},
 	CheckoutDepthFlag: {
 		description: fmt.Sprintf("Used only if --%s=%s.", CheckoutStrategyFlag, CheckoutStrategyMerge) +
 			" How many commits to include in each of base and feature branches when cloning repository." +
@@ -930,6 +948,9 @@ func (s *ServerCmd) run() error {
 		return err
 	}
 	if err := s.setDataDir(&userConfig); err != nil {
+		return err
+	}
+	if err := s.setSharePlanDir(&userConfig); err != nil {
 		return err
 	}
 	if err := s.setMarkdownTemplateOverridesDir(&userConfig); err != nil {
@@ -1237,6 +1258,31 @@ func (s *ServerCmd) setDataDir(userConfig *server.UserConfig) error {
 		return fmt.Errorf("making data-dir absolute: %w", err)
 	}
 	userConfig.DataDir = finalPath
+	return nil
+}
+
+// setSharePlanDir checks if ~ was used in share-plan-dir and converts it to the actual
+// home directory. If unset, it defaults to the resolved data-dir. It also converts relative paths to absolute.
+func (s *ServerCmd) setSharePlanDir(userConfig *server.UserConfig) error {
+	if userConfig.SharePlanDir == "" {
+		userConfig.SharePlanDir = userConfig.DataDir
+		return nil
+	}
+
+	finalPath := userConfig.SharePlanDir
+	if strings.HasPrefix(finalPath, "~/") {
+		var err error
+		finalPath, err = homedir.Expand(finalPath)
+		if err != nil {
+			return fmt.Errorf("determining home directory: %w", err)
+		}
+	}
+
+	finalPath, err := filepath.Abs(finalPath)
+	if err != nil {
+		return fmt.Errorf("making share-plan-dir absolute: %w", err)
+	}
+	userConfig.SharePlanDir = finalPath
 	return nil
 }
 
